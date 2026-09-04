@@ -680,7 +680,7 @@ body{
 .modal-card p,.modal-card li{line-height:1.55;font-size:13px}
 .modal-card ol,.modal-card ul{padding-left:20px;margin:6px 0}
 .modal-card li{margin:3px 0}
-.modal-card a{color:var(--accent-hover)}
+.modal-card a{color:color-mix(in srgb, hsl(from var(--accent) calc(h + 180) 75% 60%) 50%, var(--text))}
 .modal-card .muted{color:var(--text-dim);font-size:13px;opacity:.75}
 
 /* Other MHGU apps modal */
