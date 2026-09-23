@@ -646,11 +646,11 @@ body{
 .sum-stats{display:grid;gap:10px;margin-bottom:10px}
 /* Fixed counts rather than auto-fit: the two rows carry different kinds of
    number and reflowing them into one another would lose that split. */
-.sum-stats.cols-4{grid-template-columns:repeat(4,1fr)}
-.sum-stats.cols-3{grid-template-columns:repeat(3,1fr)}
+.sum-stats.cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.sum-stats.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .sum-stats.last{margin-bottom:0}
 /* Against the centre column, so the row folds when that column gets tight. */
-@container (max-width:300px){ .sum-stats.cols-4{grid-template-columns:repeat(2,1fr)} }
+@container (max-width:300px){ .sum-stats.cols-4{grid-template-columns:repeat(2,minmax(0,1fr))} }
 .sum-stat{text-align:center;padding:10px 6px;border:1px solid var(--line);
   border-radius:8px;background:#ffffff0a}
 .sum-stat b{display:block;font-size:22px;line-height:1.2;font-variant-numeric:tabular-nums;
@@ -666,6 +666,11 @@ body{
 /* Quest names are long. Give the reason its own line under the combo rather than
    squeezing both onto one and truncating the name that identifies the hunt. */
 .sum-roll .nuz-combo{flex:1 0 auto}
+/* The quest leads the row now: it is what the log is a log OF. Long names get
+   the ellipsis rather than pushing the row wide, which is what put a horizontal
+   scrollbar under the panel. */
+.sum-roll .ql-quest{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
 .sum-roll .nuz-reason{flex:1 0 100%;margin-left:30px;white-space:normal;line-height:1.35}
 
 /* ── Modals ─────────────────────────────────────────────────────────── */

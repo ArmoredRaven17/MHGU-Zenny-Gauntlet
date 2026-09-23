@@ -357,6 +357,12 @@
     active: false, finished: false,
     startedAt: 0, endedAt: 0,
     deaths: [],            // {weapon, style, reason, quest, n, reviveCount}
+    // One entry per RESOLVED hunt, which is what a quest log is: every quest you
+    // tried, not only the ones that cost you something. deaths[] cannot stand in
+    // for it -- a hunt you cleared, or failed without losing a combo, leaves no
+    // death behind -- so the two are recorded separately and a row carries `fell`
+    // to say which attempts did cost a combo.
+    log: [],               // {n, quest, type, weapon, style, outcome, cartedOut, carts, earned, fell, reason, retry}
     failStreak: 0,         // run-global; carts never touch it
     questsDone: {},        // "Type|Name" -> true once CLEARED; see clearedQuest()
     lockQuest: null,       // the quest you owe a retry on
@@ -892,7 +898,10 @@
     // played on the understanding it counted for nothing.
     const counts = !isArena(run.quest);
 
-    let cartedOut = false;
+    // "cartout" is not a button. It is the resolution the last cart produces,
+    // reached WITHOUT adding one -- see enforceCartLimit for why that is needed.
+    let cartedOut = outcome === "cartout";
+    if (cartedOut) outcome = "fail";
     if (outcome === "cart") {
       run.carts++; run.attemptCarts++;
       if (counts && (cfg.kill === "cart" || cfg.kill === "both")) kill(combo, "Carted");
@@ -916,12 +925,14 @@
     // one; an Arena hunt still is, since it consumed real playing time.
     run.hunts = (run.hunts || 0) + 1;
 
+    let gain = 0;
     if (outcome === "clear") {
       run.cleared++;
       if (counts) {
         // Points only ever go up — a failure costs you a loadout, which is the
         // punishment. Arena pays nothing, same as it costs nothing.
-        run.earned += Math.round((run.quest.r || 0) * run.mult);
+        gain = Math.round((run.quest.r || 0) * run.mult);
+        run.earned += gain;
         run.failStreak = 0;
         // Spent. Clearing is the only thing that takes a quest off the board.
         run.questsDone[questKey(run.quest)] = true;
@@ -941,6 +952,22 @@
         if (cfg.lockQuest && !wasRetry) run.lockQuest = run.quest;
       }
     }
+
+    // Logged here rather than at the top, because until this point the outcome is
+    // still moving: a cart can turn into a failure. Read before the rollover,
+    // which is what clears attemptCarts. Deaths beyond the attempt mark are the
+    // combos this hunt cost -- carts kill mid-attempt too, so it is not enough to
+    // ask whether the resolution itself killed anything.
+    const fellNow = run.deaths.length - (run.attemptStart ? run.attemptStart.deaths : 0);
+    run.log.push({
+      n: run.hunts, quest: run.quest.n, type: run.quest.t,
+      weapon: combo.weapon, style: combo.style,
+      outcome, cartedOut, carts: run.attemptCarts, earned: gain,
+      // The forced retry, so the log shows WHY the same quest is here twice.
+      retry: wasRetry,
+      fell: fellNow > 0,
+      reason: fellNow > 0 ? run.deaths[run.deaths.length - 1].reason : "",
+    });
 
     // Roll over into the next hunt. The loadout lock means exactly one thing:
     // you keep the combo until it dies — through clears as well as failures.
@@ -964,6 +991,21 @@
       ? { weapon: combo.weapon, style: combo.style } : null;
     run.quest = run.lockQuest || null;
     afterMutation();
+  }
+
+  // The limit can be crossed without carting, because the LIMIT can move: taking
+  // Insurance off drops it under an attempt that has already carted that many
+  // times. Checking only after a cart left the quest sitting live at 3 of 3, so
+  // the test lives here and anything that can move the limit calls it.
+  //
+  // Resolves as a failure rather than waiting for the next cart, because the
+  // carts are already taken -- the hunter was never insured, so the quest was
+  // lost at the third one.
+  function enforceCartLimit() {
+    if (!run.active || run.finished || !run.combo || !run.quest) return false;
+    if (run.attemptCarts < cartLimit(run.quest)) return false;
+    report("cartout");
+    return true;
   }
 
   // A run ends once and stays ended. runOver() is still derived, but the moment
@@ -1454,11 +1496,31 @@
       // No snapshot: only the styles cap survives, read back off the ceiling.
       ["Weapons/Styles", ruleLabel("stylesPerWeapon", capForCeiling(runMax())) ],
     ];
-    const roll = run.deaths.map(d =>
-      `<div class="bl-tag nuz-tag"><span class="sr-n">#${d.n}</span>` +
-      `<span class="nuz-combo">${escapeHtml(WEAPON_ABBREV[d.weapon] || d.weapon)} + ${escapeHtml(d.style)}</span>` +
-      `<span class="nuz-reason">${escapeHtml(d.reason)}${d.quest ? " · " + escapeHtml(d.quest) : ""}</span></div>`
-    ).join("");
+    // Every quest attempted, with the ones that cost a combo marked the way the
+    // old panel marked them -- struck through, on the fallen tint. Runs started
+    // before the log existed have no entries, so they fall back to the death roll
+    // that WAS this panel: less than it should be, but not an empty box.
+    const outcomeLabel = (e) =>
+      e.outcome === "clear" ? "Cleared" : e.cartedOut ? "Carted out" : "Failed";
+    const roll = (run.log && run.log.length)
+      ? run.log.map(e => {
+          const combo = escapeHtml(WEAPON_ABBREV[e.weapon] || e.weapon) + " + " + escapeHtml(e.style);
+          const bits = [outcomeLabel(e)];
+          if (e.retry) bits.push("Retry");
+          if (e.carts) bits.push(e.carts + " cart" + (e.carts === 1 ? "" : "s"));
+          if (e.earned) bits.push(zenny(e.earned));
+          if (e.fell && e.reason && e.reason !== outcomeLabel(e)) bits.push(escapeHtml(e.reason));
+          return `<div class="bl-tag${e.fell ? " nuz-tag" : ""}">` +
+            `<span class="sr-n">#${e.n}</span>` +
+            `<span class="ql-quest">${escapeHtml(e.quest)}</span>` +
+            `<span class="nuz-reason"><span class="${e.fell ? "nuz-combo" : ""}">${combo}</span>` +
+            ` · ${bits.join(" · ")}</span></div>`;
+        }).join("")
+      : run.deaths.map(d =>
+          `<div class="bl-tag nuz-tag"><span class="sr-n">#${d.n}</span>` +
+          `<span class="nuz-combo">${escapeHtml(WEAPON_ABBREV[d.weapon] || d.weapon)} + ${escapeHtml(d.style)}</span>` +
+          `<span class="nuz-reason">${escapeHtml(d.reason)}${d.quest ? " · " + escapeHtml(d.quest) : ""}</span></div>`
+        ).join("");
     el.innerHTML =
       `<h2>Run Over</h2>` +
       `<p class="sub">${escapeHtml(why)}</p>` +
@@ -1974,12 +2036,15 @@
   });
   // Deliberately live during a run: the set you are wearing is a fact about this
   // hunt, and a hunt you have already carted on is exactly when you would notice
-  // you are wearing it. Ticking it mid-attempt raises the limit for the attempt
-  // in progress -- which is correct, since the limit has not been reached yet or
-  // the attempt would already be over.
+  // you are wearing it. So it moves the limit for the attempt in progress, both
+  // ways -- ticking it on buys a cart, and taking it off can take one away that
+  // has already been spent.
   $("h_insurance").addEventListener("change", (e) => {
     cfg.insurance = e.target.checked;
-    save(); renderAll();
+    save();
+    // Taking it off can put the attempt at or past the limit straight away.
+    // enforceCartLimit renders through afterMutation when it fires.
+    if (!enforceCartLimit()) renderAll();
   });
   $("tabBoard").addEventListener("click", () => { view = "board"; renderAll(); });
   $("tabResult").addEventListener("click", () => { view = "summary"; renderAll(); });
